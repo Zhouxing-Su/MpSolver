@@ -147,6 +147,8 @@ public:
     using OnOptimaFound = std::function<bool(MpSolverGurobi&, std::function<bool(void)>)>;
     // on finding an MIP solution during optimization.
     using OnMipSln = std::function<void(MpEvent&)>;
+    // on visiting an MIP node during optimization.
+    using OnMipNode = std::function<void(MpEvent&)>;
 
     struct Configuration {
         static constexpr InternalSolver DefaultSolver = InternalSolver::GurobiMip;
@@ -194,8 +196,8 @@ public:
     protected:
         friend MpSolverGurobi;
 
-        MpEvent(OnMipSln onMipSolutionFound = OnMipSln())
-            : onMipSln(onMipSolutionFound) {}
+        MpEvent(OnMipSln onMipSolutionFound = OnMipSln(), OnMipNode onMipNodeVisited = OnMipNode())
+            : onMipSln(onMipSolutionFound), onMipNode(onMipNodeVisited) {}
 
     public:
         using GRBCallback::addCut;
@@ -250,10 +252,13 @@ public:
         void callback() {
             if (where == GRB_CB_MIPSOL) {
                 if (onMipSln) { onMipSln(*this); }
+            } else if (where == GRB_CB_MIPNODE) {
+                if (onMipNode) { onMipNode(*this); }
             }
         }
 
         OnMipSln onMipSln;
+        OnMipNode onMipNode;
     };
     #pragma endregion Type
 
@@ -384,12 +389,19 @@ public:
     // only use it in gurobi multi-obj mode.
     void setTimeLimitInSecond(int objIndex, double second) { model.getMultiobjEnv(objIndex).set(GRB_DoubleParam_TimeLimit, (std::max)(second, 0.0)); }
 
+    void setBestObjStop(double bestObjStop) { model.set(GRB_DoubleParam_BestObjStop, bestObjStop); }
+    void setBestBoundStop(double bestBoundStop) { model.set(GRB_DoubleParam_BestBdStop, bestBoundStop); }
+
     void setOutput(bool enable = Configuration::DefaultOutputState) { model.set(GRB_IntParam_OutputFlag, enable); }
 
     // the methods in MpSolver is invalid within the callback, only use the ones in MpEvent instead.
     void setMipSlnEvent(OnMipSln onMipSln, bool addLazy = true) {
         if (addLazy) { model.set(GRB_IntParam_LazyConstraints, 1); }
         mpEvent.onMipSln = onMipSln;
+        model.setCallback(&mpEvent);
+    }
+    void setMipNodeEvent(OnMipSln onMipNode) {
+        mpEvent.onMipSln = onMipNode;
         model.setCallback(&mpEvent);
     }
 
